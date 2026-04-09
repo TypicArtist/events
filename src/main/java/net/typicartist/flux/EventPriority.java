@@ -1,4 +1,4 @@
-package net.typicartist.nebula;
+package net.typicartist.flux;
 
 public enum EventPriority {
     HIGHEST(100),

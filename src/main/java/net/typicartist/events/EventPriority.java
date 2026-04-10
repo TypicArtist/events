@@ -1,4 +1,4 @@
-package net.typicartist.flux;
+package net.typicartist.events;
 
 public enum EventPriority {
     HIGHEST(100),
@@ -13,7 +13,7 @@ public enum EventPriority {
         this.value = value;
     }
 
-    public int getValue() {
+    public int value() {
         return this.value;
     }
 }

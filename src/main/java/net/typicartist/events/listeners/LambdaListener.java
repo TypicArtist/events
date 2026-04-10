@@ -1,12 +1,12 @@
-package net.typicartist.flux.listener;
+package net.typicartist.events.listeners;
 
 import java.util.function.Consumer;
 
 public class LambdaListener<T> extends EventListener {
     private final Consumer<? super T> action;
 
-    public LambdaListener(Class<?> type, Consumer<? super T> action, int priority, boolean once) {
-        super(type, priority, once);
+    public LambdaListener(Object owner, Class<?> type, Consumer<? super T> action, int priority, boolean once, long order) {
+        super(owner, type, priority, once, order);
         this.action = action;
     }
 

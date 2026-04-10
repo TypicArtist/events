@@ -1,11 +1,11 @@
-package net.typicartist.flux.annotation;
+package net.typicartist.events.annotation;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
-import net.typicartist.flux.EventPriority;
+import net.typicartist.events.EventPriority;
 
 @Target(value = ElementType.METHOD)
 @Retention(value = RetentionPolicy.RUNTIME)

@@ -34,22 +34,22 @@ public class EventBus {
             List<EventListener> list = listeners.get(type);
             if (list == null || list.isEmpty()) continue;
             
-            List<EventListener> toRemove = null;
+            Set<EventListener> invoked = null;
 
             for (EventListener l : list) {
                 if (!l.isActive()) continue;
-                try { 
-                    l.invoke(event); 
-                } catch (Throwable t) { 
-                    exceptionHandler.accept(t); 
-                }
+                try { l.invoke(event); } catch (Throwable t) { exceptionHandler.accept(t); }
                 if (l.isOnce()) {
-                    if (toRemove == null) toRemove = new ArrayList<>();
-                    toRemove.add(l);
+                    if (invoked == null) invoked = new HashSet<>();
+                    invoked.add(l);
                 }
                 if (cancellable != null && cancellable.isCancelled()) break;
             }
-            if (toRemove != null) list.removeAll(toRemove);
+            
+            if (invoked != null) { 
+                final Set<EventListener> s = invoked; 
+                list.removeIf(s::contains);
+            }
         }
 
         return event;
@@ -154,11 +154,10 @@ public class EventBus {
             queue.add(c);
             while (!queue.isEmpty()) {
                 Class<?> cur = queue.poll();
-                if (cur == null || visited.contains(cur)) continue;
+                if (cur == null || cur == Object.class || visited.contains(cur)) continue;
                 visited.add(cur);
                 Class<?> superclass = cur.getSuperclass();
-                if (superclass != null && !visited.contains(superclass)) queue.add(superclass);
-                queue.add(cur.getSuperclass());
+                if (superclass != null) queue.add(superclass);
                 for (Class<?> iface : cur.getInterfaces()) {
                     if (!visited.contains(iface)) queue.add(iface);
                 }

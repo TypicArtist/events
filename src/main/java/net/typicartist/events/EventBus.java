@@ -6,7 +6,6 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 import net.typicartist.events.annotation.Subscribe;
@@ -16,16 +15,11 @@ import net.typicartist.events.listeners.MethodListener;
 
 public class EventBus {
     private static final MethodHandles.Lookup LOOKUP = MethodHandles.lookup();
+    private static final Comparator<EventListener> COMPARATOR = Comparator.comparingInt(EventListener::getPriority).reversed();    
 
+    private final Set<Object> owners = Collections.newSetFromMap(new ConcurrentHashMap<>());
     private final Map<Class<?>, CopyOnWriteArrayList<EventListener>> listeners = new ConcurrentHashMap<>();
     private final Map<Class<?>, Class<?>[]> hierarchyCache = new ConcurrentHashMap<>();
-    private final Comparator<EventListener> comparator = Comparator
-            .comparingInt(EventListener::getPriority)
-            .reversed()
-            .thenComparingLong(EventListener::getOrder);
-    private final AtomicLong sequence = new AtomicLong();
-
-    private Consumer<Throwable> exceptionHandler = Throwable::printStackTrace;
 
     public <T> T post(T event) {
         ICancellable cancellable = (event instanceof ICancellable) ? (ICancellable) event : null;
@@ -34,21 +28,25 @@ public class EventBus {
             List<EventListener> list = listeners.get(type);
             if (list == null || list.isEmpty()) continue;
             
-            Set<EventListener> invoked = null;
+            List<EventListener> toRemove = null;
 
-            for (EventListener l : list) {
-                if (!l.isActive()) continue;
-                try { l.invoke(event); } catch (Throwable t) { exceptionHandler.accept(t); }
-                if (l.isOnce()) {
-                    if (invoked == null) invoked = new HashSet<>();
-                    invoked.add(l);
+            for (EventListener listener : list) {
+                if (!listener.isActive()) continue;
+                try { 
+                    listener.invoke(event); 
+                } catch (Throwable t) { 
+                    t.printStackTrace();
+                }
+                if (listener.isOnce()) {
+                    if (toRemove == null) toRemove = new ArrayList<>();
+                    toRemove.add(listener);
                 }
                 if (cancellable != null && cancellable.isCancelled()) break;
             }
             
-            if (invoked != null) { 
-                final Set<EventListener> s = invoked; 
-                list.removeIf(s::contains);
+            if (toRemove != null) { 
+                final List<EventListener> remove = toRemove; 
+                list.removeIf(remove::contains);
             }
         }
 
@@ -56,19 +54,16 @@ public class EventBus {
     }
 
     public <T> void register(Object owner, Class<T> type, Consumer<? super T> action, EventPriority priority, boolean once) {
-        addListener(type, new LambdaListener<>(owner, type, action, priority.value(), once, sequence.getAndIncrement()));
+        addListener(type, new LambdaListener<>(owner, type, action, priority.value(), once));
     }
 
     public void register(Object owner) {
-        for (CopyOnWriteArrayList<EventListener> list : listeners.values()) {
-            for (EventListener l : list) {
-                if (l.getOwner() == owner) return;
-            }
-        }
+        if (!owners.add(owner)) return;
         scanMethods(owner);
     }
 
     public void unregister(Object owner) {
+        owners.remove(owner);
         deactivate(owner);
         for (List<EventListener> list : listeners.values()) {
             list.removeIf(l -> l.getOwner() == owner);
@@ -81,8 +76,8 @@ public class EventBus {
 
     private void setActive(Object owner, boolean active) {
         for (List<EventListener> list : listeners.values()) {
-            for (EventListener l : list) {
-                if (l.getOwner() == owner) l.setActive(active);
+            for (EventListener listener : list) {
+                if (listener.getOwner() == owner) listener.setActive(active);
             }
         }
     }
@@ -97,34 +92,20 @@ public class EventBus {
         return list != null && !list.isEmpty();
     }
 
-    public void setExceptionHandler(Consumer<Throwable> handler) {
-        this.exceptionHandler = Objects.requireNonNull(handler);
-    }
-
     private void scanMethods(Object owner) {
-        Set<Class<?>> visited = new LinkedHashSet<>();
-        Deque<Class<?>> queue = new ArrayDeque<>();
-        queue.add(owner.getClass());
-
-        while (!queue.isEmpty()) {
-            Class<?> cur = queue.poll();
-            if (cur == null || cur == Object.class || visited.contains(cur)) continue;
-            visited.add(cur);
-            queue.add(cur.getSuperclass());
-            Collections.addAll(queue, cur.getInterfaces());
-
+        for (Class<?> cur : resolveHierarchy(owner.getClass())) {
             for (Method m : cur.getDeclaredMethods()) {
                 if (!isValid(m)) continue;
-                
+
                 Subscribe meta = m.getAnnotation(Subscribe.class);
                 Class<?> eventType = m.getParameterTypes()[0];
-                
+
                 try {
                     if (!m.canAccess(owner)) m.setAccessible(true);
                     MethodHandle handle = LOOKUP.unreflect(m).bindTo(owner);
-                    addListener(eventType, new MethodListener(owner, eventType, handle, meta.priority().value(), meta.once(), sequence.getAndIncrement()));
+                    addListener(eventType, new MethodListener(owner, eventType, handle, meta.priority().value(), meta.once()));
                 } catch (IllegalAccessException e) {
-                    exceptionHandler.accept(e);
+                    e.printStackTrace();
                 }
             }
         }
@@ -142,9 +123,11 @@ public class EventBus {
 
     private <T> void addListener(Class<T> type, EventListener listener) {
         CopyOnWriteArrayList<EventListener> list = listeners.computeIfAbsent(type, k -> new CopyOnWriteArrayList<>());
-        int index = Collections.binarySearch(list, listener, comparator);
-        if (index < 0) index = -index - 1;
-        list.add(index, listener);
+        synchronized (list) {
+            int index = Collections.binarySearch(list, listener, COMPARATOR);
+            if (index < 0) index = -index - 1;
+            list.add(index, listener);
+        }
     }
 
     private Class<?>[] resolveHierarchy(Class<?> clazz) {

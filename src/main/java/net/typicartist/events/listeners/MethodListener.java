@@ -5,8 +5,8 @@ import java.lang.invoke.MethodHandle;
 public class MethodListener extends EventListener {
     private final MethodHandle handle;
     
-    public MethodListener(Object owner, Class<?> type, MethodHandle handle, int priority, boolean once, long order) {
-        super(owner, type, priority, once, order);
+    public MethodListener(Object owner, Class<?> type, MethodHandle handle, int priority, boolean once) {
+        super(owner, type, priority, once);
         this.handle = handle;
     }
 
